@@ -9,18 +9,14 @@ from camera import *
 
 ################ НАСТРОЙКИ ОКНА ################
 pygame.init()
+
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption(CAPTION)
 clock = pygame.time.Clock()
 pygame.mouse.set_visible(False)
 
+################ ПОВЕРХНОСТЬ ОТРИСОВКИ ################
 display = pygame.Surface((SURFACE_WIDTH, SURFACE_HEIGHT))
-display.fill((22, 22, 22))
-
-tile_rects = []
-
-scope = pygame.image.load('Assets/scope.png')
-scope_rect = scope.get_rect()
 
 ################ ГРУППЫ СПРАЙТОВ ################
 all_sprites = pygame.sprite.Group()
@@ -29,7 +25,11 @@ player_sprite = pygame.sprite.Group()
 bullet_group = pygame.sprite.Group()
 
 
+################ ТЕСТ НА КОЛЛИЗИЮ ################
 def collision_test(rect, tiles_list):
+    """Вторым значением фунция принимает список pygame.Rect объектов,
+    так как вся карта создается в одном классе  => храниться как единый объект"""
+
     hit_list = []
     for tile in tiles_list:
         if rect.colliderect(tile):
@@ -37,6 +37,7 @@ def collision_test(rect, tiles_list):
     return hit_list
 
 ################ КАРТА УРОВНЯ ################
+tile_rects = []
 class Map(pygame.sprite.Sprite):
     def __init__(self, map_folder_name):
         super().__init__(map_sprites)
@@ -53,7 +54,6 @@ class Map(pygame.sprite.Sprite):
     def update(self):
         display.blit(self.background_image, (0, 0))
 
-        # xOffset, yOffset = camera.camera_move()
         for y, row in enumerate(self.map_data):
             for x, tile in enumerate(row):
                 if tile:
@@ -85,14 +85,15 @@ class Player(pygame.sprite.Sprite):
         # Параметры движения по оси Ox
         self.moving_right, self.moving_left = False, False
         self.speed = 2
-        self.acceleration = 0.1
 
         # Параметры прыжка (различные коэффициенты для более гибкой настройки высоты прыжка и тп)
         self.is_jump = False
         self.jump_force = 40
         self.jump_count = 0
         self.jump_coef = 0.2
+
         self.gravity = 1
+        self.acceleration = 0.1
 
     # Перемещение перосонажа по обоим осям + коллизия с картой
     def player_move(self, tiles):
@@ -131,16 +132,13 @@ class Player(pygame.sprite.Sprite):
 
     # Отрисовываем персонажа
     def blit_player(self):
-        # xOffset, yOffset = camera.camera_move(is_offset_int=True)
-        # print(xOffset, yOffset)
-
         x, y = self.rect.x - camera.offset.x, self.rect.y - camera.offset.y
+
         if self.orientation == 'right':
             display.blit(self.image, (x, y))
         elif self.orientation == 'left':
             display.blit(pygame.transform.flip(self.image, True, False), (x, y))
 
-    # Цикл персонажа
     # Цикл персонажа
     def update(self):
         self.movement = [0, 0] # Скорость перемещения перосонажа по обоим осям
@@ -165,7 +163,7 @@ class Player(pygame.sprite.Sprite):
         self.blit_player()
 
 ################ ПРИЦЕЛ ################
-class Scope(pygame.sprite.Sprite):
+class Cursor(pygame.sprite.Sprite):
     def __init__(self, scope_image_name):
         super().__init__(player_sprite)
         self.image = pygame.image.load(scope_image_name)
@@ -177,16 +175,17 @@ class Scope(pygame.sprite.Sprite):
         self.rect.centery = mouse_position[1] * (SURFACE_HEIGHT / HEIGHT)
         display.blit(self.image, self.rect)
 
-
 ################ ПУЛЯ ################
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, bullet_image_name, start_position, finish_position, speed):
         super().__init__(bullet_group)
         self.image = pygame.image.load(bullet_image_name)
-        self.rect = self.image.get_rect()
 
         self.x, self.y = start_position
-        self.start_position = (start_position[0] - camera.offset.x, start_position[1] - camera.offset.y)
+        self.start_position = (
+            start_position[0] - camera.offset.x,
+            start_position[1] - camera.offset.y,
+        )
         self.finish_position = finish_position
         self.speed = speed
 
@@ -195,25 +194,33 @@ class Bullet(pygame.sprite.Sprite):
         self.angle = atan2(self.dy, self.dx)
 
     def destroy(self):
-        # if (self.x < 0 - camera.offset.x or self.x - camera.offset.x > SURFACE_WIDTH) or \
-        #         (self.y - camera.offset.x < 0 or self.y - camera.offset.x > SURFACE_HEIGHT):
-        #     self.kill()
-        pass
+        self.rect_to_collide = pygame.Rect(
+            self.x, self.y, self.image.get_width(), self.image.get_height()
+        )
+
+        if collision_test(self.rect_to_collide, tile_rects):
+            self.kill()
+
+        x = self.x - camera.offset.x
+        y = self.y - camera.offset.y
+        if (x < 0 or x > SURFACE_WIDTH) or (y < 0 or y > SURFACE_HEIGHT):
+            self.kill()
 
     def update(self):
         self.x += self.speed * cos(self.angle)
         self.y += self.speed * sin(self.angle)
 
+        self.destroy()
+
         display.blit(self.image, (self.x - camera.offset.x, self.y - camera.offset.y))
 
-        self.destroy()
 
 ################ КАРТА ########ы########
 Map(map_folder_name='Assets/Maps/Map1')
 
 ################ ПЕРСОНАЖ ################
 player = Player(player_image_name='Assets/player.png') # Персонаж
-scope = Scope(scope_image_name='Assets/scope.png')
+cursor = Cursor(scope_image_name='Assets/scope.png')
 
 ################ КАМЕРА ################
 camera = Camera(player=player, width=SURFACE_WIDTH, height=SURFACE_HEIGHT)
@@ -229,23 +236,25 @@ while run:
     tile_rects = []
     map_sprites.update()
 
+    ################ ИГРОВЫЕ СОБЫТИЯ ################
     for event in pygame.event.get():
         if event.type == QUIT:
             run = False
 
         ################ СОБЫТИЯ КЛАВИАТУРЫ ################
         if event.type == pygame.KEYDOWN:
-            if  event.key == K_d:
+            if event.key == K_d:
                 player.moving_right = True
-                player.orientation = 'right'
-            if  event.key == K_a:
+                player.orientation = "right"
+            if event.key == K_a:
                 player.moving_left = True
-                player.orientation = 'left'
+                player.orientation = "left"
             if event.key == K_SPACE:
-                if player.collisions_types['bottom']:
+                if player.collisions_types["bottom"] or \
+                        player.collisions_types["left"] or \
+                        player.collisions_types["right"]:
                     player.is_jump = True
                     player.jump_count = player.jump_force
-
         if event.type == pygame.KEYUP:
             if event.key == K_d:
                 player.moving_right = False
@@ -255,8 +264,12 @@ while run:
         ################ СОБЫТИЯ МЫШИ ################
         if event.type == MOUSEBUTTONDOWN:
             if event.button == 1:
-                Bullet(bullet_image_name='Assets/bullet.png', start_position=player.rect.center, finish_position=scope.rect.center, speed=3)
-
+                Bullet(
+                    bullet_image_name="Assets/bullet.png",
+                    start_position=player.rect.center,
+                    finish_position=cursor.rect.center,
+                    speed=4,
+                )
     ################ ОБНОВЛЕНИЕ/АНИМАЦИЯ СПРАЙТОВ ################
     all_sprites.update()
     player_sprite.update()
@@ -264,7 +277,7 @@ while run:
     camera.scroll()
 
     # Растягиваем display на весь screen
-    surface = pygame.transform.scale(display, WINDOW_SIZE)#WINDOW_SIZE
+    surface = pygame.transform.scale(display, WINDOW_SIZE)  # WINDOW_SIZE
     screen.blit(surface, (0, 0))
 
     pygame.display.flip()
